@@ -1,0 +1,196 @@
+<?php
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
+
+require 'Firebase/autoload.php';
+
+define("PASSWORD_API","Una_clave_para_usar_para_encriptar");
+define("MINUTOS_API",60);
+define("SERVIDOR_BD","localhost");
+define("USUARIO_BD","jose");
+define("CLAVE_BD","josefa");
+define("NOMBRE_BD","bd_horarios_exam1");
+
+
+function validateToken()
+{
+    
+    $headers = apache_request_headers();
+    if(!isset($headers["Authorization"]))
+        return false;//Sin autorizacion
+    else
+    {
+        $authorization = $headers["Authorization"];
+        $authorizationArray=explode(" ",$authorization);
+        $token=$authorizationArray[1];
+        try{
+            $info=JWT::decode($token,new Key(PASSWORD_API,'HS256'));
+        }
+        catch(\Throwable $th){
+            return false;//Expirado
+        }
+
+        try{
+            $conexion= new PDO("mysql:host=".SERVIDOR_BD.";dbname=".NOMBRE_BD,USUARIO_BD,CLAVE_BD,array(PDO::MYSQL_ATTR_INIT_COMMAND=>"SET NAMES 'utf8'"));
+        }
+        catch(PDOException $e){
+            
+            $respuesta["error"]="Imposible conectar:".$e->getMessage();
+            return $respuesta;
+        }
+
+        try{
+            $consulta="select * from usuarios where id_usuario=?";
+            $sentencia=$conexion->prepare($consulta);
+            $sentencia->execute([$info->data]);
+        }
+        catch(PDOException $e){
+            $respuesta["error"]="Imposible realizar la consulta:".$e->getMessage();
+            $sentencia=null;
+            $conexion=null;
+            return $respuesta;
+        }
+        if($sentencia->rowCount()>0)
+        {
+            $respuesta["usuario"]=$sentencia->fetch(PDO::FETCH_ASSOC);
+         
+            $payload['exp']=time()+(MINUTOS_API*60);
+            $payload['data']= $respuesta["usuario"]["id_usuario"];
+            $jwt = JWT::encode($payload,PASSWORD_API,'HS256');
+            $respuesta["token"]=$jwt;
+        }
+            
+        else
+            $respuesta["mensaje_baneo"]="El usuario no se encuentra registrado en la BD";
+
+        $sentencia=null;
+        $conexion=null;
+        return $respuesta;
+    }
+    
+}
+
+
+function login($datos_login)
+{
+    try{
+        $conexion=new PDO("mysql:host=".SERVIDOR_BD.";dbname=".NOMBRE_BD,USUARIO_BD,CLAVE_BD,array(PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES 'utf8'"));
+    }
+    catch(PDOException $e)
+    {
+        $respuesta["error"]="No ha sido posible conectarse a la base de batos: ".$e->getMessage();
+        return $respuesta;
+    }
+
+    try{
+        $consulta="select * from usuarios where usuario=? and clave=?";
+        $sentencia=$conexion->prepare($consulta);
+        $sentencia->execute([$datos_login['usuario'], $datos_login['clave']]);
+
+    }
+    catch(PDOException $e)
+    {
+        $sentencia=null;
+        $conexion=null;
+        $respuesta["error"]="No he podido realizarse la consulta: ".$e->getMessage();
+        return $respuesta;
+    }
+
+    if($sentencia->rowCount()>0)
+    {
+        $respuesta["usuario"]=$sentencia->fetch(PDO::FETCH_ASSOC);
+        $payload['exp']=time()+(MINUTOS_API*60);
+        $payload['data']= $respuesta["usuario"]["id_usuario"];
+        $jwt = JWT::encode($payload,PASSWORD_API,'HS256');
+
+        $respuesta["api_session"] = $jwt;
+        //$respuesta["token"]=$jwt;
+
+    }
+    else
+        $respuesta["mensaje"]="Usuario no se encuentra regis. en la BD";
+    
+    $sentencia=null;
+    $conexion=null;
+    return $respuesta;
+}
+
+function logueado($datos_login)
+{
+    try{
+        $conexion= new PDO("mysql:host=".SERVIDOR_BD.";dbname=".NOMBRE_BD,USUARIO_BD,CLAVE_BD,array(PDO::MYSQL_ATTR_INIT_COMMAND=>"SET NAMES 'utf8'"));
+        
+    }
+    catch(PDOException $e){
+        $respuesta["error"]="Imposible conectar:".$e->getMessage();
+        return $respuesta;
+    }
+
+    try{
+        $consulta="select * from usuarios where usuario=? and clave=?";
+        $sentencia=$conexion->prepare($consulta);
+        //array asociativo
+        $sentencia->execute([$datos_login['usuario'], $datos_login['clave']]);
+
+    }
+    catch(PDOException $e){
+       $sentencia=null;
+        $conexion=null;
+        $respuesta["error"]="No he podido realizarse la consulta: ".$e->getMessage();
+        return $respuesta;
+    }
+
+    if($sentencia->rowCount()>0)
+    {
+        $respuesta["usuario"]=$sentencia->fetch(PDO::FETCH_ASSOC);  
+    }
+    else
+    {
+        $respuesta["mensaje"]="Usuario no se encuentra regis. en la BD";
+    }
+
+    $sentencia=null;
+    $conexion=null;
+    return $respuesta;
+}
+
+function horariosProfesor($id_usuario)
+{
+    try{
+        $conexion= new PDO("mysql:host=".SERVIDOR_BD.";dbname=".NOMBRE_BD,USUARIO_BD,CLAVE_BD,array(PDO::MYSQL_ATTR_INIT_COMMAND=>"SET NAMES 'utf8'"));
+        
+    }
+    catch(PDOException $e){
+        $respuesta["error"]="Imposible conectar :".$e->getMessage();
+        return $respuesta;
+    }
+    try{
+
+        $consulta="SELECT horario_lectivo.dia, horario_lectivo.hora, grupos.nombre as grupo,aulas.nombre as aula FROM horario_lectivo,grupos,aulas WHERE horario_lectivo.grupo = grupos.id_grupo and horario_lectivo.aula = aulas.id_aula and horario_lectivo.usuario=?";
+        $sentencia=$conexion->prepare($consulta);
+        $sentencia->execute([$id_usuario]);
+        $horario = $sentencia->fetchAll(PDO::FETCH_ASSOC);
+     
+    }
+     catch(PDOException $e){
+
+        $respuesta["error"]="Imposible conectar :".$e->getMessage();
+        $sentencia=null;
+        $conexion=null;
+        return $respuesta;
+    }
+
+        if ($horario) {
+        $respuesta["horario"] = $horario;
+    } else {
+        $respuesta["error"] = "No se encontraron horarios para este profesor.";
+    }
+
+   
+    $sentencia=null;
+    $conexion=null;
+    return $respuesta;
+   
+} 
+
+?>
